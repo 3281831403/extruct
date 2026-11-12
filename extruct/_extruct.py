@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import warnings
 from typing import Any, Callable
+from urllib.parse import urljoin
 
 from lxml.html import HtmlElement
 
@@ -11,12 +12,32 @@ from extruct.jsonld import JsonLdExtractor
 from extruct.microformat import MicroformatExtractor
 from extruct.opengraph import OpenGraphExtractor
 from extruct.rdfa import RDFaExtractor
-from extruct.uniform import _udublincore, _umicrodata_microformat, _uopengraph
+from extruct.uniform import (
+    _udublincore,
+    _ujsonld,
+    _umicrodata_microformat,
+    _uopengraph,
+)
 from extruct.utils import parse_html, parse_xmldom_html
 from extruct.w3cmicrodata import MicrodataExtractor
 
 logger = logging.getLogger(__name__)
 SYNTAXES = ["microdata", "opengraph", "json-ld", "microformat", "rdfa", "dublincore"]
+
+
+def _document_base_url(tree, base_url):
+    """Resolve the effective document base.
+
+    A ``<base href>`` element, if present, takes precedence over the
+    ``base_url`` argument; a relative ``href`` is itself resolved against
+    ``base_url``.
+    """
+    base_elements = tree.xpath("//base[@href]")
+    if base_elements:
+        base_href = base_elements[0].get("href")
+        if base_href and base_href.strip():
+            return urljoin(base_url, base_href.strip())
+    return base_url
 
 
 def extract(
@@ -137,27 +158,53 @@ def extract(
             if errors == "strict":
                 raise
     if uniform:
+        uniform_base_url = _document_base_url(tree, base_url)
         uniform_processors: list[
             tuple[str, Callable[..., Any], list[Any], str | None]
         ] = []
         if "microdata" in syntaxes:
+            if uniform_base_url == base_url:
+                # no <base href>: the raw extraction already resolved URLs
+                # against base_url, so it can be reused as-is
+                microdata_items = output["microdata"]
+            else:
+                # The microdata extractor resolves URLs itself, so re-extract
+                # it against the effective document base (e.g. a <base href>);
+                # the raw output above stays keyed on the caller base_url.
+                microdata_items = list(
+                    MicrodataExtractor(add_html_node=return_html_node).extract_items(
+                        tree, uniform_base_url
+                    )
+                )
             uniform_processors.append(
                 (
                     "microdata",
                     _umicrodata_microformat,
-                    output["microdata"],
+                    microdata_items,
                     schema_context,
                 )
             )
         if "microformat" in syntaxes:
+            if uniform_base_url == base_url:
+                microformat_items = output["microformat"]
+            else:
+                # mf2py resolves URL properties itself; re-parse against the
+                # effective base instead of joining its output a second time
+                microformat_items = list(
+                    MicroformatExtractor().extract_items(
+                        htmlstring_or_tree, base_url=uniform_base_url
+                    )
+                )
             uniform_processors.append(
                 (
                     "microformat",
                     _umicrodata_microformat,
-                    output["microformat"],
+                    microformat_items,
                     "http://microformats.org/wiki/",
                 )
             )
+        if "json-ld" in syntaxes:
+            uniform_processors.append(("json-ld", _ujsonld, output["json-ld"], None))
         if "opengraph" in syntaxes:
             uniform_processors.append(
                 (
@@ -180,11 +227,17 @@ def extract(
         for syntax, uniform_fn, raw, schema_ctx in uniform_processors:
             try:
                 if syntax == "opengraph":
-                    output[syntax] = uniform_fn(raw, with_og_array=with_og_array)
+                    output[syntax] = uniform_fn(
+                        raw, base_url=uniform_base_url, with_og_array=with_og_array
+                    )
                 elif syntax == "dublincore":
                     output[syntax] = uniform_fn(raw)
+                elif syntax == "json-ld":
+                    output[syntax] = uniform_fn(raw, uniform_base_url)
                 else:
-                    output[syntax] = uniform_fn(raw, schema_ctx)
+                    output[syntax] = uniform_fn(
+                        raw, schema_ctx, base_url=uniform_base_url
+                    )
             except Exception as e:
                 if errors == "ignore":
                     output[syntax] = []

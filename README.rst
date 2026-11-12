@@ -275,6 +275,20 @@ To do so set ``uniform=True`` when calling ``extract``, it's false by default fo
 
 NB rdfa structure is not uniformed yet.
 
+In uniform mode the output of each syntax is normalized further:
+
+* JSON-LD ``@graph`` containers are split into independent items,
+  ``@value`` objects are unpacked into their bare values, and absolute
+  ``@type`` URLs are aligned with the ``@context`` into short type names.
+* Microdata items without an ``itemtype`` are flattened like any other item
+  instead of keeping the raw ``properties`` wrapper.
+* Relative image and link values (e.g. ``image``, ``url``, ``og:image``) are
+  resolved to absolute URLs against the document base: a ``<base href>`` tag
+  is used when present, otherwise the ``base_url`` argument applies.
+
+This normalization only affects uniform output; raw mode (``uniform=False``)
+and documents without a ``<base>`` keep their previous behavior.
+
 Returning HTML node
 +++++++++++++++++++
 

@@ -2,6 +2,18 @@
 History
 =======
 
+Unreleased
+----------
+
+* In uniform mode, JSON-LD ``@graph`` containers are split into independent
+  items, ``@value`` objects are unpacked to bare values, and absolute
+  ``@type`` URLs are aligned with the ``@context`` into short type names.
+* Microdata items without an ``itemtype`` are now flattened in uniform mode
+  instead of keeping the raw ``properties`` wrapper.
+* Uniform mode resolves relative image and link values to absolute URLs using
+  the document's ``<base href>`` when present, otherwise the ``base_url``
+  argument. Raw mode and documents without a ``<base>`` are unaffected.
+
 v0.18.0 (2024-11-08)
 --------------------
 
